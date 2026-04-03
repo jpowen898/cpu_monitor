@@ -1,6 +1,8 @@
 import psutil
 import os
 import glob
+import json
+from pathlib import Path
 
 # =========================
 # Config
@@ -178,3 +180,35 @@ def get_fan_rpm():
 def get_ram_utilization_percent():
     """Return RAM utilization percentage."""
     return psutil.virtual_memory().percent
+
+
+# =========================
+# Learned max frequency persistence
+# =========================
+_APP_DATA_DIR = Path.home() / ".local" / "share" / "cpu_monitor"
+_LEARNED_MAX_FILE = _APP_DATA_DIR / "learned_max_freq.json"
+
+
+def load_learned_max_freq():
+    """Load the learned max frequency high water mark from disk. Returns float or None."""
+    try:
+        with open(_LEARNED_MAX_FILE) as f:
+            data = json.load(f)
+        value = float(data["high_water_mark"])
+        if value > 0:
+            return value
+    except Exception:
+        pass
+    return None
+
+
+def save_learned_max_freq(value):
+    """Atomically save the learned max frequency high water mark to disk."""
+    try:
+        _APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = _LEARNED_MAX_FILE.with_suffix(".tmp")
+        with open(tmp, "w") as f:
+            json.dump({"high_water_mark": value}, f)
+        tmp.replace(_LEARNED_MAX_FILE)
+    except Exception:
+        pass

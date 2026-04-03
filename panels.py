@@ -15,6 +15,8 @@ from helpers import (
     get_fan_rpm,
     get_freqs,
     get_ram_utilization_percent,
+    load_learned_max_freq,
+    save_learned_max_freq,
 )
 
 
@@ -118,11 +120,25 @@ class CpuThroughputPanel(BasePanel):
             deque([0.0] * HISTORY, maxlen=HISTORY) for _ in range(N_CORES)
         ]
         self.freq_total_history = deque([0.0] * HISTORY, maxlen=HISTORY)
-        self.freq_window = deque([0.0], maxlen=HISTORY)  # Same as graph window (~50 sec)
-        self.smoothed_max_freq = 0.0  # EMA of windowed max
         self.ema_alpha = 0.9  # Smoothing factor (higher = more responsive)
         self.x = np.arange(HISTORY, dtype=float)  # Advances each update
         self.current_x_offset = 0.0
+
+        # --- Learned max frequency (persisted high water mark) ---
+        _saved_max = load_learned_max_freq()
+        if _saved_max is not None:
+            # Pre-fill the window with the saved value so the percentile is
+            # immediately stable and the plot doesn't jump around on startup.
+            self.freq_window = deque([_saved_max] * HISTORY, maxlen=HISTORY)
+            self.smoothed_max_freq = _saved_max
+            self.high_water_mark = _saved_max
+        else:
+            self.freq_window = deque([0.0], maxlen=HISTORY)
+            self.smoothed_max_freq = 0.0
+            self.high_water_mark = 0.0
+        # Count of real observations (not pre-filled); high water mark is only
+        # updated once we have a full window of fresh samples.
+        self._samples_seen = 0
 
         # --- Plot widget ---
         self.plot_widget = pg.PlotWidget()
@@ -261,22 +277,26 @@ class CpuThroughputPanel(BasePanel):
         cap_freqs, hw_max_freqs = get_cpu_limits()
 
         total_freq = sum(freqs)
-        
+
         # Add to windowed frequency history
         self.freq_window.append(total_freq)
-        
+        self._samples_seen += 1
+
         # Calculate 95th percentile in current window (filters startup spikes)
-        if self.freq_window:
-            window_p95 = np.percentile(list(self.freq_window), 95)
-        else:
-            window_p95 = total_freq
-        
+        window_p95 = np.percentile(list(self.freq_window), 95)
+
+        # Once we have a full window of real observations, update the
+        # high water mark if the p95 exceeds it, then persist the new value.
+        if self._samples_seen >= HISTORY and window_p95 > self.high_water_mark:
+            self.high_water_mark = window_p95
+            save_learned_max_freq(self.high_water_mark)
+
         # Apply exponential moving average for smooth transitions
         if self.smoothed_max_freq == 0.0:
             self.smoothed_max_freq = window_p95
         else:
             self.smoothed_max_freq = (
-                self.ema_alpha * window_p95 + 
+                self.ema_alpha * window_p95 +
                 (1.0 - self.ema_alpha) * self.smoothed_max_freq
             )
 
@@ -297,8 +317,9 @@ class CpuThroughputPanel(BasePanel):
         # Update frequency line
         self.freq_line.setData(self.x, self._smooth(np.array(self.freq_total_history)))
 
-        # Update Y axis (based on smoothed windowed max)
-        y_max = max(self.smoothed_max_freq, 1.0)  # At least 1 GHz floor
+        # Update Y axis: use the high water mark as a floor so the scale never
+        # shrinks below the learned maximum, even during quiet periods.
+        y_max = max(self.smoothed_max_freq, self.high_water_mark, 1.0)
         self.plot_widget.setYRange(0, y_max, padding=0.02)
         
         self.plot_widget.setXRange(0, HISTORY - 1, padding=0)
@@ -335,7 +356,7 @@ class CpuThroughputPanel(BasePanel):
             total_util,
             total_eff,
             total_freq,
-            self.smoothed_max_freq,
+            y_max,
             limit_text,
         )
 
