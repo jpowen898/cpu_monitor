@@ -36,6 +36,35 @@ def get_freqs():
     return freqs, max_freqs
 
 
+def get_base_freqs():
+    """Return base (TDP-rated sustainable) frequencies in GHz for each logical core.
+    
+    Falls back to cpuinfo_max_freq if base_frequency is unavailable.
+    """
+    base_freqs = []
+
+    for i in range(N_CORES):
+        cpufreq_base = f"/sys/devices/system/cpu/cpu{i}/cpufreq"
+        try:
+            # Try base_frequency first (available on Intel/AMD modern CPUs)
+            base_path = os.path.join(cpufreq_base, "base_frequency")
+            with open(base_path) as f:
+                base = float(f.read().strip()) / 1e6  # kHz -> GHz
+        except Exception:
+            try:
+                # Fallback to cpuinfo_max_freq if base_frequency unavailable
+                with open(os.path.join(cpufreq_base, "cpuinfo_max_freq")) as f:
+                    base = float(f.read().strip()) / 1e6
+            except Exception:
+                # Final fallback to psutil
+                fi = psutil.cpu_freq(percpu=True)[i]
+                base = fi.max / 1000.0 if fi.max else fi.current / 1000.0
+
+        base_freqs.append(base)
+
+    return base_freqs
+
+
 def get_cpu_limits():
     """Return (scaling_max_freqs, hw_max_freqs) in GHz for each logical core.
 

@@ -1,7 +1,9 @@
 import sys
+from pathlib import Path
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout,
                               QWidget)
 from PyQt6.QtCore import QTimer
+from PyQt6.QtGui import QIcon
 
 from helpers import INTERVAL
 from panels import CpuThroughputPanel, CpuTemperaturePanel, RamUtilizationPanel
@@ -75,6 +77,9 @@ class MainWindow(QMainWindow):
 # =========================
 def main():
     app = QApplication(sys.argv)
+    icon_path = Path(__file__).with_name("icon.png")
+    if icon_path.exists():
+        app.setWindowIcon(QIcon(str(icon_path)))
     app.setStyleSheet(DARK_STYLE)
     window = MainWindow()
     window.show()

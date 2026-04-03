@@ -118,7 +118,11 @@ class CpuThroughputPanel(BasePanel):
             deque([0.0] * HISTORY, maxlen=HISTORY) for _ in range(N_CORES)
         ]
         self.freq_total_history = deque([0.0] * HISTORY, maxlen=HISTORY)
-        self.x = np.arange(HISTORY)
+        self.freq_window = deque([0.0], maxlen=HISTORY)  # Same as graph window (~50 sec)
+        self.smoothed_max_freq = 0.0  # EMA of windowed max
+        self.ema_alpha = 0.9  # Smoothing factor (higher = more responsive)
+        self.x = np.arange(HISTORY, dtype=float)  # Advances each update
+        self.current_x_offset = 0.0
 
         # --- Plot widget ---
         self.plot_widget = pg.PlotWidget()
@@ -217,6 +221,15 @@ class CpuThroughputPanel(BasePanel):
             colors.append(color)
         return colors
 
+    @staticmethod
+    def _smooth(y, sigma=0.25):
+        """Apply Gaussian smoothing for display. Does not affect underlying data."""
+        radius = int(sigma * 3)
+        k = np.arange(-radius, radius + 1)
+        kernel = np.exp(-0.5 * (k / sigma) ** 2)
+        kernel /= kernel.sum()
+        return np.convolve(y, kernel, mode='same')
+
     def _update_labels(
         self,
         utils,
@@ -248,7 +261,24 @@ class CpuThroughputPanel(BasePanel):
         cap_freqs, hw_max_freqs = get_cpu_limits()
 
         total_freq = sum(freqs)
-        total_max = sum(max_freqs)
+        
+        # Add to windowed frequency history
+        self.freq_window.append(total_freq)
+        
+        # Calculate 95th percentile in current window (filters startup spikes)
+        if self.freq_window:
+            window_p95 = np.percentile(list(self.freq_window), 95)
+        else:
+            window_p95 = total_freq
+        
+        # Apply exponential moving average for smooth transitions
+        if self.smoothed_max_freq == 0.0:
+            self.smoothed_max_freq = window_p95
+        else:
+            self.smoothed_max_freq = (
+                self.ema_alpha * window_p95 + 
+                (1.0 - self.ema_alpha) * self.smoothed_max_freq
+            )
 
         eff_values = []
         for i in range(N_CORES):
@@ -265,15 +295,17 @@ class CpuThroughputPanel(BasePanel):
             self.curves[i + 1].setData(self.x, cumulative)
 
         # Update frequency line
-        self.freq_line.setData(self.x, np.array(self.freq_total_history))
+        self.freq_line.setData(self.x, self._smooth(np.array(self.freq_total_history)))
 
-        # Update Y axis
-        self.plot_widget.setYRange(0, total_max, padding=0.02)
+        # Update Y axis (based on smoothed windowed max)
+        y_max = max(self.smoothed_max_freq, 1.0)  # At least 1 GHz floor
+        self.plot_widget.setYRange(0, y_max, padding=0.02)
+        
         self.plot_widget.setXRange(0, HISTORY - 1, padding=0)
 
         # Update key labels
         total_util = sum(utils) / N_CORES
-        total_eff = (sum(eff_values) / total_max * 100) if total_max > 0 else 0
+        total_eff = (sum(eff_values) / y_max * 100) if y_max > 0 else 0
 
         capped_cores = 0
         active_limited_cores = 0
@@ -303,7 +335,7 @@ class CpuThroughputPanel(BasePanel):
             total_util,
             total_eff,
             total_freq,
-            total_max,
+            self.smoothed_max_freq,
             limit_text,
         )
 
