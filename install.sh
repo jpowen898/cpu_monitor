@@ -48,6 +48,7 @@ Name=${APP_NAME}
 Comment=Real-time CPU monitoring dashboard
 Exec=${LAUNCHER}
 Icon=${ICON_TARGET}
+StartupWMClass=${APP_ID}
 Terminal=false
 Categories=System;Monitor;
 StartupNotify=true

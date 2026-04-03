@@ -8,6 +8,9 @@ from PyQt6.QtGui import QIcon
 from helpers import INTERVAL
 from panels import CpuThroughputPanel, CpuTemperaturePanel, RamUtilizationPanel
 
+APP_NAME = "CPU Monitor"
+APP_ID = "cpu-monitor"
+
 # =========================
 # Dark theme stylesheet
 # =========================
@@ -33,7 +36,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("CPU Monitor")
+        self.setWindowTitle(APP_NAME)
         self.resize(1100, 700)
 
         central = QWidget()
@@ -77,11 +80,17 @@ class MainWindow(QMainWindow):
 # =========================
 def main():
     app = QApplication(sys.argv)
+    app.setApplicationName(APP_ID)
+    app.setApplicationDisplayName(APP_NAME)
+    app.setDesktopFileName(APP_ID)
     icon_path = Path(__file__).with_name("icon.png")
+    icon = QIcon(str(icon_path)) if icon_path.exists() else QIcon()
     if icon_path.exists():
-        app.setWindowIcon(QIcon(str(icon_path)))
+        app.setWindowIcon(icon)
     app.setStyleSheet(DARK_STYLE)
     window = MainWindow()
+    if not icon.isNull():
+        window.setWindowIcon(icon)
     window.show()
     sys.exit(app.exec())
 
